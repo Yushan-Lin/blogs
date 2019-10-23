@@ -1,0 +1,105 @@
+
+---
+
+layout: post
+
+title: "Monitoring WebSphere standalone logs to OKD/OCP EfK"
+
+author_picture: https://avatars3.githubusercontent.com/Yushan-Lin
+
+author_github: https://github.com/Yushan-Lin
+
+seo-title: Monitoring WebSphere standalone logs to OKD/OCP EfK - OpenLiberty.io
+
+seo-description: How to send your WebSphere logs to Openshift logging Elasticsearch, Fluentd, Kibana stack
+
+---
+
+
+=  Monitoring WebSphere standalone logs to OKD/OCP EfK
+
+
+Non-kubernetes WebSphere servers can also be sent to Openshift Container Platform (OCP) logging cluster. You can then view the logs in a Kibana dashboard in OCP alongside your other deployed services, such as WebSphere Application Server traditional or Liberty environments running in Kubernetes. Logs can be sent to the OCP mux service, which is preview only.
+
+The following diagram provides an overview of how external WebSphere logs can be sent to the EfK (Elasticsearch, Fluentd, Kibana) stack:
+
+image::img/blog/blog_EfK_logging_diagram.png[width=100%]
+
+To display logs from non-kubernetes Open Liberty servers, complete the following configuration steps.
+
+Prerequisite: OCP EfK must be setup. Instructions of how to do so here:
+
+## Configure your logging cluster to receive logs
+
+1. When the mux service is enabled, Fluentd sends logs to mux pod instead of Elasticsearch:
+
+a. Include the following in your ansible inventory.ini file to expose the *mux*. The default external mux hostname is mux.{openshift_master_default_subdomain} at port 24284.
+
+    openshift_logging_use_mux=True
+    openshift_logging_mux_allow_external=True
+    openshift_logging_mux_client_mode=maximal
+
+b. When MUX_CLIENT_MODE is set to *maximal*, it means Fluentd will perform as much of the processing and formatting as possible of log records read from files or journald. Mux will perform the Kubernetes metadata annotation before submitting the records to Elasticsearch. If MUX_CLIENT_MODE is set to *minimal* Fluentd node collector will send raw logs to mux service and mux processes and formats all the incoming log records. *maximal* is the recommended way to deploy. Fluentd and mux formats the logs into https://github.com/ViaQ/fluent-plugin-viaq_data_model[ViaQ format].
+
+2. Redeploy your EfK stack with the following command to deploy the mux service:
+
+    ansible-playbook [-i </path/to/inventory>] playbooks/openshift-logging/config.yml
+
+
+3. Retrieve the certificate files needed to secure connection with OCP cluster and Liberty
+
+a. You can retrieve them from OKD console. Go to openshift-logging project > Resources > Secrets > logging-mux to find the ca and shared_key.
+b. You can also retrieve them from OCP console running the following command.
+    
+    oc get secret logging-mux --template='{{index .data "ca"}}' | base64 -d > mux-ca.crt
+    oc get secret logging-mux --template='{{index .data "shared_key"}}' | \
+      base64 -d > mux-shared-key
+
+For more information about logging ansible configurations see https://docs.openshift.com/container-platform/3.11/install_config/aggregate_logging.html[here].
+
+## Configure logs for display in Kibana
+
+https://www.ibm.com/support/knowledgecenter/SSTF9X/wasliberty-logging-json.html[Configure Liberty logs for display in a Kibana dashboard]
+
+
+https://www.ibm.com/support/knowledgecenter/SSTF9X/wasliberty-logging-json.html[Configure WebSphere Application Server logs for display in a Kibana dashboard]
+
+
+
+## Configure clients to send WebSphere logs to OCP
+1. https://docs.fluentd.org/installation[Install Fluentd] on the machine that you want to send log files.
+
+2. Configure Fluentd to read from your server logs directory by adding the following to td-agent.conf file:
+
+  <source>
+    @type tail
+    @id input_tail
+    <parse>
+      @type json
+    </parse>
+    path /path/to/WAS/server/logs/*.log
+    pos_file /path/to/position/file.pos
+    tag {tag.name} 		
+  </source>
+  
+3. Configure Fluentd to output the consumed logs to mux pod on OCP by adding the following.
+
+    <match {tag.name}> 	  
+        @type secure_forward
+        self_hostname {hostname}
+        secure yes
+        shared_key "#{File.open('/path/to/the/shared_key') do |f| f.readline end.rstrip}"
+        ca_cert_path /path/to/the/ca
+    	<server>
+    	    host mux.{openshift_master_default_subdomain}
+     	    port 24284 	  
+    	</server> 	
+    </match>
+
+4. Restart your Fluentd to apply the updated configuration changes. For more information about Fluentd configurations, check documentation: https://docs.fluentd.org/
+
+5. Result: WebSphere (and other non-kubernetes) logs are indexed under .orphaned.YYYY.MM.DD. External logs can be viewed under .orphaned.* index on the Kibana dashboards.
+
+
+image::img/blog/blog_logging_to_Efk_kibana.png[width=100%]
+
