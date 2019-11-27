@@ -16,7 +16,7 @@ Non-kubernetes WebSphere servers can also be sent to Openshift Container Platfor
 
 The following diagram provides an overview of how external tWAS/Liberty logs can be sent to the EFK (Elasticsearch, Fluentd, Kibana) stack:
 
-image::img/blog/blog_EfK_logging_diagram.png[width=100%]
+image::/img/blog/blog_EfK_logging_diagram.png[]
 
 
 To display logs from non-kubernetes WAS/Liberty servers, complete the following configuration steps.
@@ -154,7 +154,7 @@ Users can use Fluent Bit or Fluentd to collect their server logs and send them t
 ### Viewing logs on  Kibana
 
 Non-kubernetes logs are indexed under an index called .orphaned.YYYY.MM.DD in elasticsearch. Non-kubernetes logs can be viewed under .orphaned.* index on the Kibana dashboards.
-		- ![image](images/ocpkibana.png)
+image::/img/blog/ocpkibana.png[]
 
 You can get Kibana dashboards from [here](https://github.com/OpenLiberty/open-liberty-operator/tree/master/deploy/dashboards/logging) to import them into Kibana. Once the tWAS operator is created, there will a location where the tWAS dashboards will lie.
 
