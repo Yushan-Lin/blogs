@@ -33,7 +33,7 @@ You can enable JSON logging in Liberty by adding the following to bootstrap.prop
 		com.ibm.ws.logging.console.log.level=info
 	```
 You can formatting tWAS HPEL logs in JSON format using logViewer command tool.
-Example command line: `./logViewer.sh -outLog <path_to_log_file> -monitor 1 -resumable -resume -format json`
+Example command line: ```./logViewer.sh -outLog <path_to_log_file> -monitor 1 -resumable -resume -format json```
 
 ### Setting up OCP to receive external logs
 
@@ -50,11 +50,12 @@ Ansible inventory files describe the cluster configuration details for your OCP 
 		openshift_logging_mux_client_mode=maximal
 	```
 
-	When openshift_logging_mux_client_mode is set to maximal, it means Fluentd will perform as much of the processing and formatting as possible of log records read from files or journald. Mux will perform the Kubernetes metadata annotation before submitting the records to Elasticsearch. If openshift_logging_mux_client_mode is set to minimal Fluentd node collector will send raw logs to mux service and mux processes and formats all the incoming log records. Maximal is the recommended way to deploy mux. 
+When openshift_logging_mux_client_mode is set to maximal, it means Fluentd will perform as much of the processing and formatting as possible of log records read from files or journald. Mux will perform the Kubernetes metadata annotation before submitting the records to Elasticsearch. If openshift_logging_mux_client_mode is set to minimal Fluentd node collector will send raw logs to mux service and mux processes and formats all the incoming log records. Maximal is the recommended way to deploy mux. 
 
 2. Redeploy your EFK stack with the following command:
-
-	`ansible-playbook [-i </path/to/inventory>] playbooks/openshift-logging/config.yml`
+```
+	ansible-playbook [-i </path/to/inventory>] playbooks/openshift-logging/config.yml
+```
 		
 	The default external mux hostname is mux.{openshift_master_default_subdomain} at port 24284.
 
@@ -119,6 +120,7 @@ Users can use Fluent Bit or Fluentd to collect their server logs and send them t
 1. Download and install Fluent Bit on the external machine of where your tWAS/Liberty server lies.
 
 2. Create a parser configuration file to parse your JSON logs and add the following to the file:
+
 	```
 	[PARSER]
 		Name {parser.name}
@@ -126,7 +128,9 @@ Users can use Fluent Bit or Fluentd to collect their server logs and send them t
 		Time_Key ibm_datetime
 		Time_Format %Y-%m-%dT%H:%M:%S%z # Liberty uses ISO 8601 by default
 	```
+	
 3. Create a main configuration file for Fluent Bit. The following is an example configuration:
+
 	```
 	[SERVICE]
 		Flush 5
@@ -149,6 +153,7 @@ Users can use Fluent Bit or Fluentd to collect their server logs and send them t
 		tls on
 		tls.verify off
 	```
+	
 4. Start fluent-bit with the command: `fluent-bit -c /path/to/main/configuration/file`
 
 ### Viewing logs on  Kibana
