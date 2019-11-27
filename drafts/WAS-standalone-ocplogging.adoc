@@ -1,0 +1,166 @@
+---
+layout: post
+title: "Monitoring WebSphere standalone logs to OKD/OCP EFK"
+categories: blog
+author_picture: https://avatars0.githubusercontent.com/u/31770221
+author_github: https://github.com/Yushan-Lin
+seo-title: Monitoring WebSphere standalone logs to OKD/OCP EFK - OpenLiberty.io
+seo-description: How to send your WebSphere logs to Openshift logging Elasticsearch, Fluentd, Kibana stack
+blog_description: "How to send your WebSphere logs to Openshift logging Elasticsearch, Fluentd, Kibana stack"
+---
+= Monitoring WebSphere standalone logs to OKD/OCP EFK
+Yushan Lin <https://github.com/Yushan-Lin>
+
+
+Non-kubernetes WebSphere servers can also be sent to Openshift Container Platform (OCP) logging cluster. You can then view the logs in a Kibana dashboard in OCP alongside your other deployed services, such as traditional WebSphere Application Server (tWAS) or Liberty environments running in Kubernetes. Logs can be sent to the OCP mux service, which is preview only.
+
+The following diagram provides an overview of how external tWAS/Liberty logs can be sent to the EFK (Elasticsearch, Fluentd, Kibana) stack:
+
+image::img/blog/blog_EfK_logging_diagram.png[width=100%]
+
+
+To display logs from non-kubernetes WAS/Liberty servers, complete the following configuration steps.
+
+Prerequisite: OCP EFK stack must be setup. Instructions of how to do so here:
+
+## Configure your logging cluster to receive logs
+
+### Formatting Liberty JSON logs to send to OCP EFK stack
+You can enable JSON logging in Liberty by adding the following to bootstrap.properties:
+	```
+		com.ibm.ws.logging.console.format=json
+		com.ibm.ws.logging.console.source=message,trace,accessLog,ffdc,audit
+		com.ibm.ws.logging.console.log.level=info
+	```
+You can formatting tWAS HPEL logs in JSON format using logViewer command tool.
+Example command line: `./logViewer.sh -outLog <path_to_log_file> -monitor 1 -resumable -resume -format json`
+
+### Setting up OCP to receive external logs
+
+Kubernetes Fluentd collectors within OCP can send logs directly to Elasticsearch or mux. The benefits of having mux enabled is that mux can offload the processing, filtering and formatting of logs from Fluentd collectors. You can use mux to collect logs from your external server. Mux is a tech preview, but it is the best way to sending logs to EFK since it acts as a central logging service for external clients to send their logs to.
+
+All logs sent to OCP's logging stack will be formatted in ViaQ format. Fluentd and mux can both process and format the logs in ViaQ format. Information about how ViaQ formats logs can be found here: https://github.com/ViaQ/fluent-plugin-viaq_data_model/
+
+Ansible inventory files describe the cluster configuration details for your OCP installation. The OCP installation playbooks read your inventory file to know where and how to install OCP across your set of hosts. Users can assign global cluster environment variables during the Ansible installation, add them to the **[OSEv3:vars]** section of the /etc/ansible/hosts file.
+
+1. To enable and expose mux, add the following to your inventory.ini file:
+	```
+		openshift_logging_use_mux=True
+		openshift_logging_mux_allow_external=True
+		openshift_logging_mux_client_mode=maximal
+	```
+
+	When openshift_logging_mux_client_mode is set to maximal, it means Fluentd will perform as much of the processing and formatting as possible of log records read from files or journald. Mux will perform the Kubernetes metadata annotation before submitting the records to Elasticsearch. If openshift_logging_mux_client_mode is set to minimal Fluentd node collector will send raw logs to mux service and mux processes and formats all the incoming log records. Maximal is the recommended way to deploy mux. 
+
+2. Redeploy your EFK stack with the following command:
+
+	`ansible-playbook [-i </path/to/inventory>] playbooks/openshift-logging/config.yml`
+		
+	The default external mux hostname is mux.{openshift_master_default_subdomain} at port 24284.
+
+3. Retrieve the certificate files needed to secure connection with OCP cluster and Liberty/tWAS
+
+	a. You can retrieve them from OKD console. Go to openshift-logging project > Resources > Secrets > logging-mux to find the ca and shared_key.
+	b. You can also retrieve them from OCP console running the following command.
+
+	    ```
+	    oc get secret logging-mux --template='{{index .data "ca"}}' | base64 -d > mux-ca.crt
+	    oc get secret logging-mux --template='{{index .data "shared_key"}}' | \
+	      base64 -d > mux-shared-key
+	    ```
+
+4. Copy over the ca and shared_key in mux secrets to the machine the tWAS/Liberty server is running on
+
+
+### Setting up Liberty/tWAS nodes to send logs to OCP EFK stack
+
+Users can use Fluent Bit or Fluentd to collect their server logs and send them to the OCP. Some users may use Fluent Bit since it runs on ~450KB only. Thus, Fluent Bit is much more lightweight compared to Fluentd running on 40MB. However, Fluentd has a larger eco-system with more plugins available for users to take advantage of.
+
+#### Fluentd
+1. Download Fluentd on the external machine of where your tWAS/Liberty server lies.
+
+2. By default, the td-agent.conf is a Fluentd configuration file. You can specify the sources Fluentd collects logs from, how Fluentd process and formats the logs, and where Fluentd sends the logs to. You can create your own Fluentd configuration file and start Fluentd with the command: `fluentd -c /path/to/Fluentd/configuration/file`
+
+3. You must install the Fluentd secure_forward plugin. To install the plugin, run the command: `sudo gem install fluent-plugin-secure-forward`
+
+4. Adding the following to your Fluentd configuration file:
+
+	```
+	<source>
+	  @type tail
+	  @id input_tail
+	  <parse>
+	    @type json
+	  </parse>
+	  path /path/to/tWAS/Liberty/server/logs/*.log
+	  pos_file /path/to/position/file.pos
+	  tag {tag.name} 		
+	</source>
+	```
+
+5. Add the following in your Fluentd configuration file right below reading the source to send logs to EFK stack. Restart the Fluentd on your external machine:
+
+	```
+	<match {tag.name}> 	  
+	     @type secure_forward
+	 	self_hostname {hostname}
+	      secure yes
+	      shared_key "#{File.open('/path/to/the/shared_key') do |f| f.readline end.rstrip}"
+	      ca_cert_path /path/to/the/ca 	  
+	 	<server>
+			host mux.{openshift_master_default_subdomain}
+		 	port 24284 	  
+	 	</server> 	
+	</match>
+	 ```
+
+#### Fluent Bit
+
+1. Download and install Fluent Bit on the external machine of where your tWAS/Liberty server lies.
+
+2. Create a parser configuration file to parse your JSON logs and add the following to the file:
+	```
+	[PARSER]
+		Name {parser.name}
+		Format json
+		Time_Key ibm_datetime
+		Time_Format %Y-%m-%dT%H:%M:%S%z # Liberty uses ISO 8601 by default
+	```
+3. Create a main configuration file for Fluent Bit. The following is an example configuration:
+	```
+	[SERVICE]
+		Flush 5
+		Daemon off
+		Log_Level debug
+		Parsers_File /path/to/parser/conf/file
+	[INPUT]
+		Name tail
+		Path /path/to/tWAS/Liberty/server/logs/*.log
+		Tag {tag.name}
+		Parser {parser.name}
+	[OUTPUT]
+		Name forward
+		Match {tag.name}
+		Host mux.{openshift_master_default_subdomain}
+		Port 24284
+		Shared_Key {shared_key}
+		Self_Hostname {hostname}
+		tls.ca_file /path/to/ca/
+		tls on
+		tls.verify off
+	```
+4. Start fluent-bit with the command: `fluent-bit -c /path/to/main/configuration/file`
+
+### Viewing logs on  Kibana
+
+Non-kubernetes logs are indexed under an index called .orphaned.YYYY.MM.DD in elasticsearch. Non-kubernetes logs can be viewed under .orphaned.* index on the Kibana dashboards.
+		- ![image](images/ocpkibana.png)
+
+You can get Kibana dashboards from [here](https://github.com/OpenLiberty/open-liberty-operator/tree/master/deploy/dashboards/logging) to import them into Kibana. Once the tWAS operator is created, there will a location where the tWAS dashboards will lie.
+
+For more information about WAS Liberty logging configurations: https://openliberty.io/docs/ref/config/#logging.html
+For more information about tWAS logViewer command: https://www.ibm.com/support/knowledgecenter/SSAW57_9.0.5/com.ibm.websphere.nd.multiplatform.doc/ae/rtrb_logviewer.html
+For more information about Fluentd: https://docs.fluentd.org
+For more information about openshift-logging ansible configurations: https://docs.openshift.com/container-platform/3.11/install_config/aggregate_logging.html#aggregated-fluentd
+For more information about how to setup and configure Fluent Bit: https://docs.fluentbit.io/manual/
+
